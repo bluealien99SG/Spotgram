@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import { useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
 import { CornerUpRight, MapPin, Car, Footprints, Bike, Train } from "lucide-react";
 
 interface DirectionsPanelProps {
@@ -13,92 +12,6 @@ interface DirectionsPanelProps {
   setSelectedOrigin: (origin: { lat: number; lng: number } | null) => void;
   metrics?: { distance: string; duration: string } | null;
   setMetrics?: (metrics: { distance: string; duration: string } | null) => void;
-  isGoogleMaps?: boolean;
-}
-
-export function RouteDisplay({
-  origin,
-  destination,
-  travelMode,
-  onComputed,
-}: {
-  origin: { lat: number; lng: number } | null;
-  destination: { lat: number; lng: number };
-  travelMode: "DRIVING" | "WALKING" | "BICYCLING" | "TRANSIT";
-  onComputed?: (dist: string, dur: string) => void;
-}) {
-  const map = useMap();
-  const routesLib = useMapsLibrary("routes");
-  const polylinesRef = useRef<google.maps.Polyline[]>([]);
-
-  useEffect(() => {
-    if (!routesLib || !map || !origin || !destination) return;
-    
-    // Clear previous routes polylines
-    polylinesRef.current.forEach((p) => p.setMap(null));
-    polylinesRef.current = [];
-
-    routesLib.Route.computeRoutes({
-      origin,
-      destination,
-      travelMode,
-      fields: ["path", "distanceMeters", "durationMillis", "viewport"],
-    })
-      .then(({ routes }) => {
-        if (routes && routes[0]) {
-          const newPolylines = routes[0].createPolylines();
-          newPolylines.forEach((poly) => {
-            poly.setOptions({
-              strokeColor: travelMode === "WALKING" ? "#f59e0b" : "#ea580c",
-              strokeOpacity: 0.85,
-              strokeWeight: 6,
-            });
-            poly.setMap(map);
-          });
-          polylinesRef.current = newPolylines;
-
-          // Adjust zoom layout bounds
-          if (routes[0].viewport) {
-            map.fitBounds(routes[0].viewport);
-          }
-
-          // Format metrics
-          const distMeters = routes[0].distanceMeters || 0;
-          const durationMillis = Number(routes[0].durationMillis || 0);
-          
-          let distStr = "";
-          if (distMeters >= 1000) {
-            distStr = `${(distMeters / 1000).toFixed(1)} km`;
-          } else {
-            distStr = `${distMeters} meters`;
-          }
-
-          const totalMinutes = Math.round(durationMillis / 60000);
-          let durationStr = "";
-          if (totalMinutes >= 60) {
-            const hrs = Math.floor(totalMinutes / 60);
-            const mins = totalMinutes % 60;
-            durationStr = `${hrs} hr ${mins} min`;
-          } else {
-            durationStr = `${totalMinutes} min`;
-          }
-
-          if (onComputed) {
-            onComputed(distStr, durationStr);
-          }
-        }
-      })
-      .catch((err) => {
-        console.error("Failed to compute coordinates route:", err);
-      });
-
-    return () => {
-      polylinesRef.current.forEach((p) => p.setMap(null));
-      polylinesRef.current = [];
-    };
-  }, [routesLib, map, origin, destination, travelMode]);
-
-  return null;
 }
 
 export default function DirectionsPanel({
@@ -111,20 +24,11 @@ export default function DirectionsPanel({
   onRouteCalculated,
   metrics,
   setMetrics,
-  isGoogleMaps = false,
 }: DirectionsPanelProps) {
   const [addressInput, setAddressInput] = useState("");
   const [addressLoading, setAddressLoading] = useState(false);
   const [errorWord, setErrorWord] = useState<string | null>(null);
   
-  // Conditionally obtain places library (wrapped in try/catch to ensure NO crash if not loaded)
-  let placesLib: any = null;
-  try {
-    placesLib = useMapsLibrary("places");
-  } catch (e) {
-    // Expected if not inside an APIProvider
-  }
-
   const isMounted = useRef(true);
 
   useEffect(() => {
@@ -184,32 +88,6 @@ export default function DirectionsPanel({
           setSelectedOrigin({ lat: latVal, lng: lonVal });
           setAddressInput(item.display_name || addressInput);
           setAddressLoading(false);
-        } else if (placesLib) {
-          // Fallback to Google Places text search if available
-          placesLib.Place.searchByText({
-            textQuery: addressInput,
-            fields: ["location", "displayName", "formattedAddress"],
-            maxResultCount: 1,
-          })
-            .then(({ places }) => {
-              if (!isMounted.current) return;
-              if (places && places[0] && places[0].location) {
-                const loc = places[0].location;
-                setSelectedOrigin({ lat: loc.lat(), lng: loc.lng() });
-                setAddressInput(places[0].displayName || places[0].formattedAddress || addressInput);
-              } else {
-                setErrorWord("Could not find address coordinate mapping profile.");
-              }
-            })
-            .catch((gErr) => {
-              console.error(gErr);
-              setErrorWord("Failed to resolve address.");
-            })
-            .finally(() => {
-              if (isMounted.current) {
-                setAddressLoading(false);
-              }
-            });
         } else {
           setErrorWord("Could not find address location coordinates on map.");
           setAddressLoading(false);
@@ -217,45 +95,10 @@ export default function DirectionsPanel({
       })
       .catch((err) => {
         console.error("OSM Geocoder problem:", err);
-        // Fallback to Google Places directly
-        if (placesLib) {
-          placesLib.Place.searchByText({
-            textQuery: addressInput,
-            fields: ["location", "displayName", "formattedAddress"],
-            maxResultCount: 1,
-          })
-            .then(({ places }) => {
-              if (!isMounted.current) return;
-              if (places && places[0] && places[0].location) {
-                const loc = places[0].location;
-                setSelectedOrigin({ lat: loc.lat(), lng: loc.lng() });
-                setAddressInput(places[0].displayName || places[0].formattedAddress || addressInput);
-              } else {
-                setErrorWord("Could not find address coordinate mapping profile.");
-              }
-            })
-            .catch(() => {
-              setErrorWord("Failed to resolve address coordinates.");
-            })
-            .finally(() => {
-              if (isMounted.current) {
-                setAddressLoading(false);
-              }
-            });
-        } else {
-          setErrorWord("Direct geocoding failed. Try a different search input format.");
-          setAddressLoading(false);
-        }
+        if (!isMounted.current) return;
+        setErrorWord("Failed to resolve address coordinates. Please try another query.");
+        setAddressLoading(false);
       });
-  };
-
-  const handleMetricsReceived = (dist: string, dur: string) => {
-    if (setMetrics) {
-      setMetrics({ distance: dist, duration: dur });
-    }
-    if (onRouteCalculated) {
-      onRouteCalculated(dist, dur);
-    }
   };
 
   return (
@@ -357,16 +200,6 @@ export default function DirectionsPanel({
             </div>
           )}
         </div>
-      )}
-
-      {/* Secret Route display injected directly inside Map */}
-      {selectedOrigin && isGoogleMaps && (
-        <RouteDisplay
-          origin={selectedOrigin}
-          destination={{ lat: destinationLat, lng: destinationLng }}
-          travelMode={travelMode}
-          onComputed={handleMetricsReceived}
-        />
       )}
     </div>
   );
