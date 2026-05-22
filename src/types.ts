@@ -40,3 +40,5 @@ export interface AffiliateOffer {
   buttonText: string;
   price?: string;
 }
+
+

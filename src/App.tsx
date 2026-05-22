@@ -11,6 +11,7 @@ import LocationDetails from "./components/LocationDetails";
 import DirectionsPanel from "./components/DirectionsPanel";
 import SimpleMap from "./components/SimpleMap";
 import { DemoPhoto } from "./data";
+import SocialHub from "./components/SocialHub";
 
 // Extract Google Maps API Key from environment defining blocks
 const API_KEY =
@@ -87,6 +88,7 @@ export default function App() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [demoSelection, setDemoSelection] = useState<DemoPhoto | null>(null);
+  const [activeTab, setActiveTab] = useState<"finder" | "social">("finder");
   
   // Transition steps: "landing" | "checking" | "ai_scantrack" | "results"
   const [step, setStep] = useState<"landing" | "checking" | "ai_scantrack" | "results">("landing");
@@ -212,17 +214,55 @@ export default function App() {
       {/* Header controls */}
       <Header credits={credits} onOpenCheckout={() => setCheckoutOpen(true)} />
 
+      {/* Navigation Tabs Selector */}
+      <div className="bg-white border-b border-orange-100/60 sticky top-[80px] z-30 shadow-xs">
+        <div className="max-w-6xl mx-auto px-6 flex items-center justify-start gap-4sm:gap-6">
+          <button
+            id="tab-finder"
+            onClick={() => setActiveTab("finder")}
+            className={`py-3.5 px-3 text-xs font-black uppercase tracking-widest border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === "finder"
+                ? "border-orange-500 text-slate-950"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <span>📍 Spot Finder</span>
+          </button>
+          <button
+            id="tab-social"
+            onClick={() => setActiveTab("social")}
+            className={`py-3.5 px-3 text-xs font-black uppercase tracking-widest border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === "social"
+                ? "border-orange-500 text-slate-950"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <span>💬 Social Hub</span>
+            <span className="flex h-1.5 w-1.5 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
+            </span>
+          </button>
+        </div>
+      </div>
+
       {/* Main viewport segments */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-10">
         
-        {/* Landing Select Stage */}
-        {step === "landing" && (
-          <DemoAndUpload
-            onPhotoSelected={processPhotoSelection}
-            credits={credits}
-            onOpenCheckout={() => setCheckoutOpen(true)}
-          />
-        )}
+        {/* Render Social Hub component when active */}
+        {activeTab === "social" && <SocialHub />}
+
+        {/* Spot Finder Views */}
+        {activeTab === "finder" && (
+          <>
+            {/* Landing Select Stage */}
+            {step === "landing" && (
+              <DemoAndUpload
+                onPhotoSelected={processPhotoSelection}
+                credits={credits}
+                onOpenCheckout={() => setCheckoutOpen(true)}
+              />
+            )}
 
         {/* Loading analytical screen */}
         {step === "checking" && (
@@ -416,6 +456,8 @@ export default function App() {
             />
 
           </div>
+        )}
+          </>
         )}
 
       </main>
