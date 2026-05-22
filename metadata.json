@@ -1,0 +1,6 @@
+{
+  "name": "Photo Location Finder & Tour Guide",
+  "description": "Unlock location coordinates from picture EXIF data, discover spots using AI vision, view tourist spots on interactive maps, see sun angles & golden hours, contact tour guides, and compute routes.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
