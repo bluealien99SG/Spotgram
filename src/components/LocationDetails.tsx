@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Compass, BookOpen, Clock, AlertTriangle, Eye, ArrowRight, Video, Mail, CheckCircle2, Calendar, ThumbsUp, Flame, CheckSquare, Sparkles } from "lucide-react";
 import { LocationTips } from "../types";
 import { MOCK_GUIDES, MOCK_OFFERS } from "../data";
+import { supabase } from "../supabase";
 
 interface LocationDetailsProps {
   lat: number;
@@ -21,6 +22,9 @@ export default function LocationDetails({ lat, lng, spotName }: LocationDetailsP
   const [plannedActivities, setPlannedActivities] = useState<string[]>([]);
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [visitNotes, setVisitNotes] = useState("");
+  const [isCheckingInDb, setIsCheckingInDb] = useState(false);
+  const [entries, setEntries] = useState<any[]>([]);
+  const [offlineEntries, setOfflineEntries] = useState<any[]>([]);
 
   const handleToggleActivity = (activity: string) => {
     setPlannedActivities((prev) => 
@@ -30,9 +34,94 @@ export default function LocationDetails({ lat, lng, spotName }: LocationDetailsP
     );
   };
 
-  const handleCheckInSubmit = (e: React.FormEvent) => {
+  // Fetch entries from Supabase + setup real-time live channel subscription
+  useEffect(() => {
+    const fetchEntries = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("entries")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(20);
+
+        if (error) {
+          console.warn("Could not load entries from Supabase:", error.message);
+        } else if (data) {
+          setEntries(data);
+        }
+      } catch (err: any) {
+        console.warn("Supabase fetch failed, continuing with offline memory buffer:", err.message);
+      }
+    };
+
+    fetchEntries();
+
+    // Subscribe to INSERT event updates live on Supabase entries table
+    const entriesChannel = supabase
+      .channel("public-traveler-entries")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "entries" },
+        (payload) => {
+          console.log("Real-time insertion detected!", payload.new);
+          setEntries((prev) => {
+            // Idempotency check: verify entry doesn't already exist in state
+            if (prev.some((item) => item.id === payload.new.id)) return prev;
+            return [payload.new, ...prev];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(entriesChannel);
+    };
+  }, []);
+
+  const handleCheckInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsCheckedIn(true);
+    setIsCheckingInDb(true);
+
+    const ticketId = `SG-TICKET-${Math.abs(Math.sin(lat) * 10000).toFixed(0)}`;
+    const newEntry = {
+      spot_name: spotName || "Verified GPS Horizon Spot",
+      latitude: lat,
+      longitude: lng,
+      crowd_level: crowdLevel,
+      visit_notes: visitNotes,
+      planned_activities: JSON.stringify(plannedActivities),
+      passport_id: ticketId,
+      user_email: "bisz98@gmail.com"
+    };
+
+    try {
+      const { data, error } = await supabase
+        .from("entries")
+        .insert([newEntry])
+        .select();
+
+      if (error) {
+        console.warn("Failing insert query to Supabase: ", error.message);
+        setOfflineEntries((prev) => [
+          { ...newEntry, id: `offline-${Date.now()}`, created_at: new Date().toISOString() },
+          ...prev
+        ]);
+      } else if (data && data.length > 0) {
+        setEntries((prev) => {
+          if (prev.some((item) => item.id === data[0].id)) return prev;
+          return [data[0], ...prev];
+        });
+      }
+    } catch (err: any) {
+      console.warn("Query connection issue, failing gracefully to local cache:", err.message);
+      setOfflineEntries((prev) => [
+        { ...newEntry, id: `offline-${Date.now()}`, created_at: new Date().toISOString() },
+        ...prev
+      ]);
+    } finally {
+      setIsCheckingInDb(false);
+      setIsCheckedIn(true);
+    }
   };
 
   useEffect(() => {
@@ -369,6 +458,68 @@ export default function LocationDetails({ lat, lng, spotName }: LocationDetailsP
                   <CheckSquare className="w-3.5 h-3.5 text-white" /> Check In & Unlock My Official Spotgram Ticket
                 </button>
               </form>
+            )}
+
+            {/* Live traveler feed of previous check-ins */}
+            {(offlineEntries.length > 0 || entries.length > 0) && (
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between border-t border-orange-100/40 pt-4">
+                  <h5 className="text-[10px] font-black uppercase text-slate-800 tracking-widest flex items-center gap-1.5 font-mono">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                    Live Traveler Activities ({(offlineEntries.length + entries.length)})
+                  </h5>
+                  <span className="text-[9px] text-slate-400 font-medium">Synced via Supabase Realtime</span>
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-1">
+                  {[...offlineEntries, ...entries].map((entry) => {
+                    let actCount = 0;
+                    try {
+                      const parsed = JSON.parse(entry.planned_activities || "[]");
+                      actCount = Array.isArray(parsed) ? parsed.length : 0;
+                    } catch {
+                      actCount = 0;
+                    }
+                    const isNew = new Date(entry.created_at).getTime() > Date.now() - 60000;
+
+                    return (
+                      <div 
+                        key={entry.id || entry.created_at} 
+                        className={`p-3 rounded-xl border bg-white/70 backdrop-blur-xs transition-colors flex flex-col justify-between space-y-2 ${
+                          isNew ? "border-orange-500/60 shadow-md bg-orange-50/20" : "border-slate-150"
+                        }`}
+                      >
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-start gap-2">
+                            <span className="text-[10px] font-bold text-slate-905 truncate max-w-[130px]" title={entry.spot_name}>
+                              📍 {entry.spot_name}
+                            </span>
+                            <span className="text-[8px] font-mono text-slate-400">
+                              {new Date(entry.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          
+                          {entry.visit_notes ? (
+                            <p className="text-[10.5px] text-slate-600 line-clamp-2 italic leading-snug">
+                              &ldquo;{entry.visit_notes}&rdquo;
+                            </p>
+                          ) : (
+                            <p className="text-[10.5px] text-slate-405 italic">No notes provided</p>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-[9px] font-mono text-slate-505">
+                          <span className="capitalize text-[8.5px] font-bold flex items-center gap-1 text-slate-600">
+                            <span className={`w-14 h-1 rounded-full ${entry.crowd_level === 'quiet' ? 'bg-green-500 animate-pulse' : entry.crowd_level === 'moderate' ? 'bg-amber-500 animate-pulse' : 'bg-red-500 animate-pulse'}`} style={{ width: '6px', height: '6px' }}></span>
+                            {entry.crowd_level || "moderate"} crowd
+                          </span>
+                          <span className="text-orange-650 font-bold">{actCount} camera missions</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             )}
           </div>
 

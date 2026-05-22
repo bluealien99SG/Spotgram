@@ -1,6 +1,7 @@
-import React, { useState, useRef } from "react";
-import { UploadCloud, Image as ImageIcon, MapPin, Search } from "lucide-react";
+import React, { useState, useRef, useEffect } from "react";
+import { UploadCloud, Image as ImageIcon, MapPin, Search, Sparkles } from "lucide-react";
 import { DEMO_PHOTOS, DemoPhoto } from "../data";
+import { supabase } from "../supabase";
 
 interface DemoAndUploadProps {
   onPhotoSelected: (file: File | null, demoPhoto: DemoPhoto | null) => void;
@@ -11,6 +12,47 @@ interface DemoAndUploadProps {
 export default function DemoAndUpload({ onPhotoSelected, credits, onOpenCheckout }: DemoAndUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [liveEntries, setLiveEntries] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchGlobalEntries = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("entries")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(6);
+
+        if (!error && data) {
+          setLiveEntries(data);
+        }
+      } catch (err) {
+        console.warn("Offline fallback for landing feed:", err);
+      }
+    };
+
+    fetchGlobalEntries();
+
+    // Setup real-time channel subscription for instant landing posts update
+    const channel = supabase
+      .channel("landing-entries-channel")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "entries" },
+        (payload) => {
+          console.log("Instant feed update detected!", payload.new);
+          setLiveEntries((prev) => {
+            if (prev.some((item) => item.id === payload.new.id)) return prev;
+            return [payload.new, ...prev.slice(0, 5)];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -186,6 +228,68 @@ export default function DemoAndUpload({ onPhotoSelected, credits, onOpenCheckout
           ))}
         </div>
       </div>
+
+      {/* Real-time Global Activity Feed Box */}
+      {liveEntries.length > 0 && (
+        <div className="max-w-5xl mx-auto space-y-4 pt-8 border-t border-slate-100 animate-in fade-in slide-in-from-bottom-2 duration-400">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#f97316] opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#f97316]"></span>
+              </span>
+              <h3 className="text-sm font-black text-slate-950 uppercase tracking-wider font-sans">Live Spotgram Traveler Activity</h3>
+            </div>
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest font-mono">
+              Live updates active via Supabase
+            </span>
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {liveEntries.map((item) => {
+              let comps = 0;
+              try {
+                const parsed = JSON.parse(item.planned_activities || "[]");
+                comps = Array.isArray(parsed) ? parsed.length : 0;
+              } catch {
+                comps = 0;
+              }
+
+              return (
+                <div 
+                  key={item.id} 
+                  className="bg-white/85 border border-slate-150 rounded-2xl p-4 flex flex-col justify-between hover:border-orange-200 hover:shadow-xs transition-all animate-in fade-in scale-in duration-300"
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-xs font-extrabold text-slate-905 truncate block max-w-[190px]">
+                        📍 {item.spot_name}
+                      </span>
+                      <span className="text-[8px] font-mono text-slate-400 font-semibold uppercase">
+                        {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed italic">
+                      {item.visit_notes ? `"${item.visit_notes}"` : "Explored and logged this landmark."}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between border-t border-slate-50 pt-2.5 mt-3 text-[9px] font-mono">
+                    <span className="font-bold flex items-center gap-1 text-slate-600 capitalize">
+                      <span className={`w-1.5 h-1.5 rounded-full ${item.crowd_level === "quiet" ? "bg-green-500" : item.crowd_level === "moderate" ? "bg-amber-500" : "bg-red-500"}`}></span>
+                      {item.crowd_level || "moderate"}
+                    </span>
+                    <span className="text-orange-650 font-bold">
+                      {comps} camera missions
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
